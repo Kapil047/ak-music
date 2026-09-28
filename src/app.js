@@ -1,0 +1,40 @@
+﻿import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
+import { env } from './config/env.js';
+import { requestIdMiddleware } from './middlewares/requestId.js';
+import { globalLimiter } from './middlewares/rateLimiter.js';
+import { authMiddleware } from './middlewares/auth.js';
+import { cryptoMiddleware } from './middlewares/cryptoMiddleware.js';
+import { errorHandler, notFoundHandler } from './middlewares/errorHandler.js';
+import { apiRouter } from './routes/index.js';
+
+export const app = express();
+
+// 1. Security & Optimizations
+app.use(helmet());
+app.use(cors());
+app.use(compression());
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// 2. Correlation Tracking & Rate Limiting
+app.use(requestIdMiddleware);
+app.use('/api', globalLimiter);
+
+// 3. Authentication
+app.use('/api', authMiddleware);
+
+// 4. End-to-End Encryption & Decryption
+app.use('/api', cryptoMiddleware);
+
+// 5. API Routes
+app.use('/api/v1', apiRouter);
+
+// 6. Static public CDN
+app.use('/public', express.static('./public'));
+
+// 7. Error Handling
+app.use(notFoundHandler);
+app.use(errorHandler);
