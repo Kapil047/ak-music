@@ -8,6 +8,7 @@ import { healthRouter } from './healthRoutes.js';
 import { updateRouter } from './updateRoutes.js';
 import { userRouter } from './userRoutes.js';
 import { authRouter } from './authRoutes.js';
+import { queueRouter } from './queueRoutes.js';
 
 export const apiRouter = express.Router();
 
@@ -20,4 +21,6 @@ apiRouter.use('/', exploreRouter);
 apiRouter.use('/', metaRouter);
 apiRouter.use('/', downloadRouter);
 apiRouter.use('/', userRouter);
+apiRouter.use('/', queueRouter);
+
 

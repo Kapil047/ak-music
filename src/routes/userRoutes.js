@@ -7,6 +7,8 @@ import {
   createPlaylist,
   getUserPlaylists,
   addTrackToPlaylist,
+  deletePlaylist,
+  togglePlaylistFavorite,
   logPlaybackHistory,
   getPlaybackHistory,
   clearPlaybackHistory,
@@ -28,6 +30,9 @@ userRouter.delete('/user/favorites/:songId', removeFavorite);
 userRouter.post('/user/playlists', createPlaylist);
 userRouter.get('/user/playlists', getUserPlaylists);
 userRouter.post('/user/playlists/:playlistId/tracks', addTrackToPlaylist);
+userRouter.delete('/user/playlists/:playlistId', deletePlaylist);
+userRouter.patch('/user/playlists/:playlistId/favorite', togglePlaylistFavorite);
+userRouter.post('/user/playlists/:playlistId/favorite', togglePlaylistFavorite);
 
 // History
 userRouter.post('/user/history', logPlaybackHistory);

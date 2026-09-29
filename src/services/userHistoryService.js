@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { db, isFirebaseReady } from '../config/firebase.js';
 import { logger } from '../utils/logger.js';
+import { cacheService } from './cacheService.js';
 
 // In-Memory store fallback if Firebase is offline
 const localSearches = new Map();
@@ -331,6 +332,8 @@ class UserHistoryService {
           });
         }
       }
+
+      cacheService.invalidateForUser(uid);
     } catch (err) {
       logger.error({ err: err.message, uid, songId }, 'recordPlay failed');
     }
@@ -374,6 +377,8 @@ class UserHistoryService {
           list.push({ searchQuery: clean, count: 1, lastSearchedAt: Date.now() });
         }
       }
+
+      cacheService.invalidateForUser(uid);
     } catch (err) {
       logger.error({ err: err.message, uid, searchQuery }, 'recordSearch failed');
     }

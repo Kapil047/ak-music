@@ -1,4 +1,4 @@
-﻿import NodeCache from 'node-cache';
+import NodeCache from 'node-cache';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
@@ -37,6 +37,16 @@ class CacheService {
 
   getStats() {
     return this.cache.getStats();
+  }
+
+  invalidateForUser(uid) {
+    if (!uid) return;
+    const marker = `:${uid}:`;
+    const keys = this.cache.keys().filter((k) => k.includes(marker));
+    if (keys.length) {
+      this.cache.del(keys);
+      logger.debug({ uid, count: keys.length }, 'Invalidated cache for user');
+    }
   }
 }
 

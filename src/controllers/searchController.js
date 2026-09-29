@@ -31,14 +31,25 @@ export async function searchSongs(req, res, next) {
       }
     }
 
-    const results = rawItems.map((item) => ({
-      id: item.id || item.videoId || '',
-      title: typeof item.title === 'string' ? item.title : (item.title?.text || item.title?.runs?.[0]?.text || 'Unknown Title'),
-      artists: item.artists ? item.artists.map((a) => (typeof a === 'string' ? a : a.name || a.text || '')) : [],
-      album: item.album ? (typeof item.album === 'string' ? item.album : item.album.name || item.album.text || null) : null,
-      duration: item.duration ? (typeof item.duration.seconds === 'number' ? item.duration.seconds : 0) : 0,
-      thumbnails: item.thumbnails || (item.thumbnail?.contents || [])
-    })).filter((item) => item.id);
+    const results = rawItems.map((item) => {
+      const thumbs = item.thumbnails || (item.thumbnail?.contents || []);
+      let bestThumb = null;
+      if (Array.isArray(thumbs) && thumbs.length > 0) {
+        bestThumb = thumbs[thumbs.length - 1]?.url || thumbs[0]?.url;
+        if (bestThumb && bestThumb.includes('googleusercontent.com')) {
+          bestThumb = bestThumb.replace(/=w\d+-h\d+/, '=w800-h800').replace(/=s\d+/, '=s800');
+        }
+      }
+      return {
+        id: item.id || item.videoId || '',
+        title: typeof item.title === 'string' ? item.title : (item.title?.text || item.title?.runs?.[0]?.text || 'Unknown Title'),
+        artists: item.artists ? item.artists.map((a) => (typeof a === 'string' ? a : a.name || a.text || '')) : [],
+        album: item.album ? (typeof item.album === 'string' ? item.album : item.album.name || item.album.text || null) : null,
+        duration: item.duration ? (typeof item.duration.seconds === 'number' ? item.duration.seconds : 0) : 0,
+        thumbnail: bestThumb,
+        thumbnails: thumbs
+      };
+    }).filter((item) => item.id);
 
     const continuation = searchResponse.has_continuation ? searchResponse.continuation : null;
 
@@ -86,10 +97,11 @@ export async function recordPlayEvent(req, res, next) {
       return ApiResponse.error(res, 'songId and title are required', 'ERR_VALIDATION', 400);
     }
 
-    if (uid) {
-      await userHistoryService.recordPlay(uid, { songId, title, artist, thumbnail, duration });
+    if (!uid) {
+      return ApiResponse.success(res, { recorded: false, reason: 'no_uid' });
     }
 
+    await userHistoryService.recordPlay(uid, { songId, title, artist, thumbnail, duration });
     return ApiResponse.success(res, { recorded: true }, { message: 'Play recorded' });
   } catch (err) {
     next(err);
@@ -100,12 +112,16 @@ export async function recordSearchQuery(req, res, next) {
   try {
     const uid = req.user?.uid;
     const { query } = req.body || {};
-    if (uid && query && query.trim()) {
-      await userHistoryService.recordSearch(uid, query.trim());
+
+    if (!uid || !query || !query.trim()) {
+      return ApiResponse.success(res, { recorded: false });
     }
+
+    await userHistoryService.recordSearch(uid, query.trim());
     return ApiResponse.success(res, { recorded: true });
   } catch (err) {
     next(err);
   }
 }
+
 

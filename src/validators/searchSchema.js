@@ -1,4 +1,4 @@
-﻿import { z } from 'zod';
+import { z } from 'zod';
 
 export const searchSchema = z.object({
   query: z.object({
@@ -10,6 +10,11 @@ export const searchSchema = z.object({
 
 export const suggestionsSchema = z.object({
   query: z.object({
-    q: z.string().min(1, 'Query parameter q is required').max(100)
-  })
+    q: z.string().max(100).optional(),
+    limit: z
+      .string()
+      .optional()
+      .transform((val) => (val ? parseInt(val, 10) : undefined)),
+  }),
 });
+

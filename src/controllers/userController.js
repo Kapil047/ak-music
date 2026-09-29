@@ -84,29 +84,31 @@ export async function removeFavorite(req, res, next) {
 export async function createPlaylist(req, res, next) {
   try {
     const { uid } = req.user;
-    const { name, description } = req.body;
+    const { id, name, description, tracks, isFavorite, thumbnailUrl } = req.body;
 
     if (!name || !name.trim()) {
       return ApiResponse.error(res, 'Playlist name is required', 'ERR_VALIDATION', 400);
     }
 
-    const playlistId = 'pl_' + Date.now();
+    const playlistId = id || ('pl_' + Date.now());
     const playlistData = {
       id: playlistId,
-      name,
+      name: name.trim(),
       description: description || '',
-      tracks: [],
+      tracks: Array.isArray(tracks) ? tracks : [],
+      isFavorite: !!isFavorite,
+      thumbnailUrl: thumbnailUrl || null,
       createdAt: Date.now()
     };
 
     if (isFirebaseReady) {
-      await db.collection('users').doc(uid).collection('playlists').doc(playlistId).set(playlistData);
+      await db.collection('users').doc(uid).collection('playlists').doc(playlistId).set(playlistData, { merge: true });
     } else {
       if (!localStore.playlists.has(uid)) localStore.playlists.set(uid, new Map());
       localStore.playlists.get(uid).set(playlistId, playlistData);
     }
 
-    return ApiResponse.success(res, playlistData, { message: 'Playlist created' });
+    return ApiResponse.success(res, playlistData, { message: 'Playlist saved' });
   } catch (err) {
     next(err);
   }
@@ -115,17 +117,64 @@ export async function createPlaylist(req, res, next) {
 export async function getUserPlaylists(req, res, next) {
   try {
     const { uid } = req.user;
+    const onlyFavorite = req.query.favorite === 'true';
     let playlists = [];
 
     if (isFirebaseReady) {
-      const snapshot = await db.collection('users').doc(uid).collection('playlists').orderBy('createdAt', 'desc').get();
+      let query = db.collection('users').doc(uid).collection('playlists');
+      if (onlyFavorite) {
+        query = query.where('isFavorite', '==', true);
+      }
+      const snapshot = await query.orderBy('createdAt', 'desc').get();
       playlists = snapshot.docs.map((doc) => doc.data());
     } else {
       const userPls = localStore.playlists.get(uid);
-      if (userPls) playlists = Array.from(userPls.values()).reverse();
+      if (userPls) {
+        playlists = Array.from(userPls.values()).reverse();
+        if (onlyFavorite) {
+          playlists = playlists.filter((p) => p.isFavorite === true);
+        }
+      }
     }
 
     return ApiResponse.success(res, playlists);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function togglePlaylistFavorite(req, res, next) {
+  try {
+    const { uid } = req.user;
+    const { playlistId } = req.params;
+    const { isFavorite } = req.body || {};
+
+    let updatedPlaylist = null;
+
+    if (isFirebaseReady) {
+      const ref = db.collection('users').doc(uid).collection('playlists').doc(playlistId);
+      const doc = await ref.get();
+      if (!doc.exists) {
+        return ApiResponse.error(res, 'Playlist not found', 'ERR_NOT_FOUND', 404);
+      }
+      const data = doc.data();
+      const newStatus = typeof isFavorite === 'boolean' ? isFavorite : !data.isFavorite;
+      await ref.update({ isFavorite: newStatus });
+      updatedPlaylist = { ...data, isFavorite: newStatus };
+    } else {
+      const userPls = localStore.playlists.get(uid);
+      const playlist = userPls ? userPls.get(playlistId) : null;
+      if (!playlist) {
+        return ApiResponse.error(res, 'Playlist not found', 'ERR_NOT_FOUND', 404);
+      }
+      const newStatus = typeof isFavorite === 'boolean' ? isFavorite : !playlist.isFavorite;
+      playlist.isFavorite = newStatus;
+      updatedPlaylist = playlist;
+    }
+
+    return ApiResponse.success(res, updatedPlaylist, {
+      message: updatedPlaylist.isFavorite ? 'Playlist marked as favorite' : 'Playlist removed from favorites'
+    });
   } catch (err) {
     next(err);
   }
@@ -158,6 +207,24 @@ export async function addTrackToPlaylist(req, res, next) {
       playlist.tracks.push({ ...track, addedAt: Date.now() });
       return ApiResponse.success(res, playlist);
     }
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deletePlaylist(req, res, next) {
+  try {
+    const { uid } = req.user;
+    const { playlistId } = req.params;
+
+    if (isFirebaseReady) {
+      await db.collection('users').doc(uid).collection('playlists').doc(playlistId).delete();
+    } else {
+      const userPls = localStore.playlists.get(uid);
+      if (userPls) userPls.delete(playlistId);
+    }
+
+    return ApiResponse.success(res, { playlistId }, { message: 'Playlist deleted' });
   } catch (err) {
     next(err);
   }
