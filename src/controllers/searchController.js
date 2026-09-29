@@ -1,5 +1,7 @@
-﻿import { innertubePool } from '../services/innertubePool.js';
-import { getSearchSuggestions } from '../services/suggestionService.js';
+import { innertubePool } from '../services/innertubePool.js';
+import { getSearchSuggestions, getHomeFeed } from '../services/suggestionService.js';
+import { userHistoryService } from '../services/userHistoryService.js';
+
 import { cacheService } from '../services/cacheService.js';
 import { ApiResponse } from '../utils/apiResponse.js';
 import { env } from '../config/env.js';
@@ -18,14 +20,25 @@ export async function searchSongs(req, res, next) {
       return await client.music.search(q, { type });
     });
 
-    const results = (searchResponse.results || []).map((item) => ({
-      id: item.id,
-      title: item.title,
-      artists: item.artists ? item.artists.map((a) => a.name) : [],
-      album: item.album ? item.album.name : null,
-      duration: item.duration ? item.duration.seconds : null,
-      thumbnails: item.thumbnails || []
-    }));
+    let rawItems = [];
+    if (Array.isArray(searchResponse.results) && searchResponse.results.length > 0) {
+      rawItems = searchResponse.results;
+    } else if (Array.isArray(searchResponse.contents)) {
+      for (const section of searchResponse.contents) {
+        if (Array.isArray(section.contents) && section.contents.length > 0) {
+          rawItems.push(...section.contents);
+        }
+      }
+    }
+
+    const results = rawItems.map((item) => ({
+      id: item.id || item.videoId || '',
+      title: typeof item.title === 'string' ? item.title : (item.title?.text || item.title?.runs?.[0]?.text || 'Unknown Title'),
+      artists: item.artists ? item.artists.map((a) => (typeof a === 'string' ? a : a.name || a.text || '')) : [],
+      album: item.album ? (typeof item.album === 'string' ? item.album : item.album.name || item.album.text || null) : null,
+      duration: item.duration ? (typeof item.duration.seconds === 'number' ? item.duration.seconds : 0) : 0,
+      thumbnails: item.thumbnails || (item.thumbnail?.contents || [])
+    })).filter((item) => item.id);
 
     const continuation = searchResponse.has_continuation ? searchResponse.continuation : null;
 
@@ -38,10 +51,61 @@ export async function searchSongs(req, res, next) {
 
 export async function getSuggestions(req, res, next) {
   try {
-    const { q } = req.query;
-    const suggestions = await getSearchSuggestions(q);
+    const { q, limit } = req.query;
+    const uid = req.user?.uid || null;
+
+    // Empty query = Home Feed (Recent > Top > Favorites > Trending)
+    if (!q || !q.trim()) {
+      const feed = await getHomeFeed(uid, limit ? parseInt(limit, 10) : 20);
+      return ApiResponse.success(res, {
+        top: null,
+        all: feed,
+        isTrending: true,
+        isPersonalized: !!uid && feed.some((f) => f.source !== 'trending'),
+      });
+    }
+
+    const suggestions = await getSearchSuggestions(
+      q,
+      uid,
+      limit ? parseInt(limit, 10) : 10
+    );
+
     return ApiResponse.success(res, suggestions);
   } catch (err) {
     next(err);
   }
 }
+
+export async function recordPlayEvent(req, res, next) {
+  try {
+    const uid = req.user?.uid;
+    const { songId, title, artist, thumbnail, duration } = req.body || {};
+
+    if (!songId || !title) {
+      return ApiResponse.error(res, 'songId and title are required', 'ERR_VALIDATION', 400);
+    }
+
+    if (uid) {
+      await userHistoryService.recordPlay(uid, { songId, title, artist, thumbnail, duration });
+    }
+
+    return ApiResponse.success(res, { recorded: true }, { message: 'Play recorded' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function recordSearchQuery(req, res, next) {
+  try {
+    const uid = req.user?.uid;
+    const { query } = req.body || {};
+    if (uid && query && query.trim()) {
+      await userHistoryService.recordSearch(uid, query.trim());
+    }
+    return ApiResponse.success(res, { recorded: true });
+  } catch (err) {
+    next(err);
+  }
+}
+

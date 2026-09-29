@@ -1,4 +1,4 @@
-﻿import ffmpeg from 'fluent-ffmpeg';
+import ffmpeg from 'fluent-ffmpeg';
 import ffmpegPath from 'ffmpeg-static';
 import NodeID3 from 'node-id3';
 import fs from 'fs';
@@ -8,6 +8,11 @@ import { innertubePool } from './innertubePool.js';
 import { downloadLimit } from './downloadQueue.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+const YTDLP_PATH = 'C:\\Users\\RYZEN 4750\\AppData\\Roaming\\Python\\Python313\\Scripts\\yt-dlp.exe';
 
 // Setup static binary for cross-platform Windows compatibility
 if (ffmpegPath) {
@@ -29,39 +34,57 @@ export async function convertAndDownloadMp3(videoId, metadata = {}) {
     try {
       logger.info({ videoId, tempId }, 'Starting audio extraction for MP3 download');
 
-      // 1. Download stream from Innertube
-      const stream = await innertubePool.executeWithRetry(async (client) => {
-        return await client.download(videoId, {
-          type: 'audio',
-          quality: 'best'
+      let downloadSuccess = false;
+      try {
+        // 1. Try Innertube first
+        const stream = await innertubePool.executeWithRetry(async (client) => {
+          return await client.download(videoId, {
+            type: 'audio',
+            quality: 'best'
+          });
         });
-      });
 
-      // Write raw stream to temp file
-      const fileStream = fs.createWriteStream(inputPath);
-      const reader = stream.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        fileStream.write(value);
+        // Write raw stream to temp file
+        const fileStream = fs.createWriteStream(inputPath);
+        const reader = stream.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          fileStream.write(value);
+        }
+        fileStream.end();
+
+        await new Promise((resolve, reject) => {
+          fileStream.on('finish', resolve);
+          fileStream.on('error', reject);
+        });
+
+        // Transcode with ffmpeg
+        await new Promise((resolve, reject) => {
+          ffmpeg(inputPath)
+            .toFormat('mp3')
+            .audioBitrate(320)
+            .on('end', resolve)
+            .on('error', reject)
+            .save(outputPath);
+        });
+        downloadSuccess = true;
+      } catch (innerErr) {
+        logger.warn({ videoId, err: innerErr.message }, 'Innertube download failed, falling back to yt-dlp');
       }
-      fileStream.end();
 
-      // Wait for write finish
-      await new Promise((resolve, reject) => {
-        fileStream.on('finish', resolve);
-        fileStream.on('error', reject);
-      });
-
-      // 2. Transcode to MP3 using ffmpeg-static
-      await new Promise((resolve, reject) => {
-        ffmpeg(inputPath)
-          .toFormat('mp3')
-          .audioBitrate(320)
-          .on('end', resolve)
-          .on('error', reject)
-          .save(outputPath);
-      });
+      // If innertube failed, use yt-dlp direct extraction
+      if (!downloadSuccess) {
+        logger.info({ videoId }, 'Extracting audio via yt-dlp...');
+        await execFileAsync(YTDLP_PATH, [
+          '-x',
+          '--audio-format', 'mp3',
+          '--audio-quality', '0',
+          '--ffmpeg-location', ffmpegPath,
+          '-o', outputPath,
+          `https://www.youtube.com/watch?v=${videoId}`
+        ]);
+      }
 
       // 3. Inject ID3 Tags
       const tags = {

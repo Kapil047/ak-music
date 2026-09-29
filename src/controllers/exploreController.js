@@ -1,4 +1,4 @@
-﻿import { innertubePool } from '../services/innertubePool.js';
+import { innertubePool } from '../services/innertubePool.js';
 import { cacheService } from '../services/cacheService.js';
 import { ApiResponse } from '../utils/apiResponse.js';
 import { env } from '../config/env.js';
@@ -44,12 +44,36 @@ export async function getRadioQueue(req, res, next) {
     const cached = cacheService.get(cacheKey);
     if (cached) return ApiResponse.success(res, cached, { fromCache: true });
 
-    const related = await innertubePool.executeWithRetry(async (client) => {
-      return await client.music.getRelated(id);
-    });
+    let songs = [];
+    try {
+      const upNext = await innertubePool.executeWithRetry(async (client) => {
+        return await client.music.getUpNext(id, { isAudioOnly: true });
+      });
 
-    cacheService.set(cacheKey, related, env.CACHE_TTL_EXPLORE);
-    return ApiResponse.success(res, related);
+      if (Array.isArray(upNext?.contents)) {
+        songs = upNext.contents
+          .filter((item) => item && (item.video_id || item.id))
+          .map((item) => ({
+            id: item.video_id || item.id,
+            videoId: item.video_id || item.id,
+            title: typeof item.title === 'string' ? item.title : (item.title?.text || item.title?.runs?.[0]?.text || 'Unknown Title'),
+            artist: item.artists?.map((a) => (typeof a === 'string' ? a : a.name || '')).filter(Boolean).join(', ') || item.author || 'Various Artists',
+            author: item.author || 'Various Artists',
+            thumbnail: item.thumbnail?.[item.thumbnail.length - 1]?.url || item.thumbnails?.[item.thumbnails.length - 1]?.url || null,
+            thumbnails: item.thumbnail || item.thumbnails || [],
+            duration: item.duration?.seconds || 0,
+            album: item.album?.name || null
+          }));
+      }
+    } catch (innerErr) {
+      const related = await innertubePool.executeWithRetry(async (client) => {
+        return await client.music.getRelated(id);
+      }).catch(() => null);
+      if (related) songs = related;
+    }
+
+    cacheService.set(cacheKey, songs, env.CACHE_TTL_EXPLORE);
+    return ApiResponse.success(res, songs);
   } catch (err) {
     next(err);
   }

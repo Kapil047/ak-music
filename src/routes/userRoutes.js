@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import { verifyUserAuth } from '../middlewares/authFirebase.js';
 import {
   addFavorite,
@@ -8,7 +8,10 @@ import {
   getUserPlaylists,
   addTrackToPlaylist,
   logPlaybackHistory,
-  getPlaybackHistory
+  getPlaybackHistory,
+  clearPlaybackHistory,
+  getUserSettings,
+  saveUserSettings
 } from '../controllers/userController.js';
 
 export const userRouter = express.Router();
@@ -29,3 +32,10 @@ userRouter.post('/user/playlists/:playlistId/tracks', addTrackToPlaylist);
 // History
 userRouter.post('/user/history', logPlaybackHistory);
 userRouter.get('/user/history', getPlaybackHistory);
+userRouter.delete('/user/history', clearPlaybackHistory);
+
+// Settings (Cloud & Offline Sync)
+userRouter.get('/user/settings', getUserSettings);
+userRouter.put('/user/settings', saveUserSettings);
+
+

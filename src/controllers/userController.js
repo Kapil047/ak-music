@@ -1,11 +1,12 @@
-﻿import { db, isFirebaseReady } from '../config/firebase.js';
+import { db, isFirebaseReady } from '../config/firebase.js';
 import { ApiResponse } from '../utils/apiResponse.js';
 
 // In-Memory fallback store if Firebase credentials not set yet
 const localStore = {
   favorites: new Map(),
   playlists: new Map(),
-  history: new Map()
+  history: new Map(),
+  settings: new Map()
 };
 
 // ---------------- FAVORITES ----------------
@@ -177,7 +178,10 @@ export async function logPlaybackHistory(req, res, next) {
     };
 
     if (isFirebaseReady) {
-      await db.collection('users').doc(uid).collection('history').doc(songId).set(historyItem);
+      const ref = db.collection('users').doc(uid).collection('history').doc(songId);
+      const doc = await ref.get().catch(() => ({ exists: false }));
+      const playCount = doc.exists ? ((doc.data()?.playCount || 1) + 1) : 1;
+      await ref.set({ ...historyItem, playCount }, { merge: true });
     } else {
       if (!localStore.history.has(uid)) localStore.history.set(uid, new Map());
       localStore.history.get(uid).set(songId, historyItem);
@@ -188,6 +192,24 @@ export async function logPlaybackHistory(req, res, next) {
     next(err);
   }
 }
+
+export async function clearPlaybackHistory(req, res, next) {
+  try {
+    const { uid } = req.user;
+    if (isFirebaseReady) {
+      const snapshot = await db.collection('users').doc(uid).collection('history').get();
+      const batch = db.batch();
+      snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+      await batch.commit();
+    } else {
+      localStore.history.delete(uid);
+    }
+    return ApiResponse.success(res, { cleared: true }, { message: 'History cleared' });
+  } catch (err) {
+    next(err);
+  }
+}
+
 
 export async function getPlaybackHistory(req, res, next) {
   try {
@@ -207,3 +229,51 @@ export async function getPlaybackHistory(req, res, next) {
     next(err);
   }
 }
+
+// ---------------- USER SETTINGS (CLOUD & OFFLINE SYNC) ----------------
+export async function getUserSettings(req, res, next) {
+  try {
+    const { uid } = req.user;
+    let settings = {
+      seekDurationSeconds: 10,
+      accentColor: 'Emerald Green',
+      audioQuality: 'High Quality',
+      language: 'Hindi, Punjabi, English',
+      region: 'IN'
+    };
+
+    if (isFirebaseReady) {
+      const doc = await db.collection('users').doc(uid).collection('settings').doc('preferences').get();
+      if (doc.exists) {
+        settings = { ...settings, ...doc.data() };
+      }
+    } else {
+      const userSet = localStore.settings.get(uid);
+      if (userSet) settings = { ...settings, ...userSet };
+    }
+
+    return ApiResponse.success(res, settings);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function saveUserSettings(req, res, next) {
+  try {
+    const { uid } = req.user;
+    const newSettings = req.body || {};
+
+    if (isFirebaseReady) {
+      const ref = db.collection('users').doc(uid).collection('settings').doc('preferences');
+      await ref.set({ ...newSettings, updatedAt: Date.now() }, { merge: true });
+    } else {
+      const existing = localStore.settings.get(uid) || {};
+      localStore.settings.set(uid, { ...existing, ...newSettings, updatedAt: Date.now() });
+    }
+
+    return ApiResponse.success(res, newSettings, { message: 'Settings saved successfully' });
+  } catch (err) {
+    next(err);
+  }
+}
+

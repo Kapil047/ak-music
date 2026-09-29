@@ -1,4 +1,4 @@
-﻿import { env } from '../config/env.js';
+import { env } from '../config/env.js';
 import { ApiResponse } from '../utils/apiResponse.js';
 
 export function authMiddleware(req, res, next) {
@@ -7,7 +7,6 @@ export function authMiddleware(req, res, next) {
     req.path.includes('/health') ||
     req.path.includes('/metrics') ||
     req.path.includes('/app/update') ||
-    req.path.includes('/app/scripts') ||
     req.path.startsWith('/public')
   ) {
     return next();

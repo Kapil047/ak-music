@@ -2,9 +2,9 @@
   "updateAvailable": true,
   "versionInt": 4003,
   "versionName": "v3.0.1",
-  "checksum": "6ce216554f4e451b2c6e36f2da0d3af0",
-  "updateLink": "http://github.com/Khang-NT/YMusicContents/raw/debug/v1/apks/baseRelease-v3.0.1.apk",
-  "updateAltLink": "https://drive.google.com/uc?id=1X9qIjwQNF-lSkoTxaq1ajFtSrisPLyLO&export=download",
+  "checksum": "",
+  "updateLink": " ",
+  "updateAltLink": "https://drive.google.com ",
   "whatsNew": [
     "Inbuilt youtube comments, now you can see, add, like, delete comments on youtube videos from within Videoder",
     "Subtitles Downloading is here. You can either download subtitle files separately or merge subtitles in the video itself",

@@ -1,4 +1,4 @@
-﻿import fs from 'fs';
+import fs from 'fs';
 import path from 'path';
 import { ApiResponse } from '../utils/apiResponse.js';
 
@@ -11,11 +11,3 @@ export function getUpdateManifest(req, res) {
   return ApiResponse.error(res, 'Update manifest not found', 'ERR_NOT_FOUND', 404);
 }
 
-export function getClientScript(req, res) {
-  const scriptFile = path.resolve('./public/scripts/inject_ytmusic.js');
-  if (fs.existsSync(scriptFile)) {
-    res.setHeader('Content-Type', 'application/javascript');
-    return res.sendFile(scriptFile);
-  }
-  return ApiResponse.error(res, 'Script not found', 'ERR_NOT_FOUND', 404);
-}
