@@ -21,23 +21,29 @@ async function downloadFile(url, dest) {
 }
 
 async function run() {
+  if (process.platform === 'win32') {
+    console.log('Windows detected, skipping Linux yt-dlp binary download');
+    return;
+  }
+
   const binDir = path.resolve('./bin');
   if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
 
   const dest = path.join(binDir, 'yt-dlp');
-  if (!fs.existsSync(dest) || fs.statSync(dest).size < 1000000) {
-    console.log('Downloading yt-dlp standalone Linux binary for production...');
-    await downloadFile('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp', dest);
-    console.log('Downloaded yt-dlp successfully! Size:', fs.statSync(dest).size, 'bytes');
+  // Check if true standalone ELF binary (>= 35MB) is present
+  if (!fs.existsSync(dest) || fs.statSync(dest).size < 35000000) {
+    console.log('Downloading yt-dlp_linux standalone ELF binary for production...');
+    await downloadFile('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux', dest);
+    console.log('Downloaded yt-dlp_linux successfully! Size:', fs.statSync(dest).size, 'bytes');
   } else {
-    console.log('yt-dlp already present, size:', fs.statSync(dest).size);
+    console.log('yt-dlp_linux already present, size:', fs.statSync(dest).size);
   }
 
-  if (process.platform !== 'win32') {
-    try {
-      fs.chmodSync(dest, 0o755);
-      console.log('Set executable permissions on yt-dlp');
-    } catch (_) {}
+  try {
+    fs.chmodSync(dest, 0o755);
+    console.log('Set 0755 executable permissions on yt-dlp');
+  } catch (err) {
+    console.warn('chmod warning:', err.message);
   }
 }
 

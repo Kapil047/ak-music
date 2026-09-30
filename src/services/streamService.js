@@ -49,7 +49,7 @@ export async function getYtDlpAudioUrl(videoId) {
   const ytdlpPath = getYtDlpPath();
 
   try {
-    const { stdout } = await execFileAsync(ytdlpPath, [
+    const { stdout, stderr } = await execFileAsync(ytdlpPath, [
       '-g',
       '-f',
       'bestaudio',
@@ -64,7 +64,7 @@ export async function getYtDlpAudioUrl(videoId) {
       return url;
     }
   } catch (err) {
-    logger.error({ videoId, ytdlpPath, err: err.message }, 'yt-dlp extraction error');
+    logger.error({ videoId, ytdlpPath, err: err.message, stderr: err.stderr }, 'yt-dlp extraction error');
   }
   return null;
 }
