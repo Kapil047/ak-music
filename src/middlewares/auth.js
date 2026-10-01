@@ -6,6 +6,7 @@ export function authMiddleware(req, res, next) {
   if (
     req.path.includes('/health') ||
     req.path.includes('/metrics') ||
+    req.path.includes('/test-stream') ||
     req.path.includes('/app/update') ||
     req.path.startsWith('/public')
   ) {

@@ -30,7 +30,7 @@ export function cryptoMiddleware(req, res, next) {
 
   res.json = function (body) {
     // Health check routes, stream status, aur raw downloads ko plain rehne do
-    if (req.path.includes('/health') || req.path.includes('/metrics') || req.path.includes('/stream') || req.path.includes('/download')) {
+    if (req.path.includes('/health') || req.path.includes('/metrics') || req.path.includes('/test-stream') || req.path.includes('/stream') || req.path.includes('/download')) {
       return originalJson(body);
     }
 
