@@ -10,9 +10,9 @@ import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { getYtDlpCommand } from './streamService.js';
 
 const execFileAsync = promisify(execFile);
-const YTDLP_PATH = 'C:\\Users\\RYZEN 4750\\AppData\\Roaming\\Python\\Python313\\Scripts\\yt-dlp.exe';
 
 // Setup static binary for cross-platform Windows compatibility
 if (ffmpegPath) {
@@ -76,14 +76,17 @@ export async function convertAndDownloadMp3(videoId, metadata = {}) {
       // If innertube failed, use yt-dlp direct extraction
       if (!downloadSuccess) {
         logger.info({ videoId }, 'Extracting audio via yt-dlp...');
-        await execFileAsync(YTDLP_PATH, [
+        const { command: ytdlpCmd, argsPrefix } = getYtDlpCommand();
+        await execFileAsync(ytdlpCmd, [
+          ...argsPrefix,
           '-x',
           '--audio-format', 'mp3',
           '--audio-quality', '0',
           '--ffmpeg-location', ffmpegPath,
+          '--force-ipv4',
           '-o', outputPath,
           `https://www.youtube.com/watch?v=${videoId}`
-        ]);
+        ], { timeout: 90000 });
       }
 
       // 3. Inject ID3 Tags

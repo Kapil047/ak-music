@@ -1,6 +1,7 @@
 import { cacheService } from '../services/cacheService.js';
 import { innertubePool } from '../services/innertubePool.js';
 import { ApiResponse } from '../utils/apiResponse.js';
+import { getYtDlpCommand } from '../services/streamService.js';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -14,23 +15,22 @@ export function getHealth(req, res) {
     diag.binExists = fs.existsSync(localLinux);
     if (diag.binExists) {
       diag.binSize = fs.statSync(localLinux).size;
-      try {
-        fs.chmodSync(localLinux, 0o755);
-        diag.chmodOk = true;
-      } catch (e) {
-        diag.chmodErr = e.message;
-      }
-      try {
-        diag.binVersion = execSync(`${localLinux} --version`, { timeout: 4000 }).toString().trim();
-      } catch (e) {
-        diag.binExecErr = e.message;
-      }
     }
 
     try {
       diag.pythonVersion = execSync('python3 --version', { timeout: 3000 }).toString().trim();
     } catch (e) {
       diag.pythonErr = e.message;
+    }
+
+    const { command, argsPrefix } = getYtDlpCommand();
+    diag.ytdlpTarget = `${command} ${argsPrefix.join(' ')}`.trim();
+
+    try {
+      const cmdStr = argsPrefix.length > 0 ? `"${command}" ${argsPrefix.join(' ')} --version` : `"${command}" --version`;
+      diag.ytdlpVersion = execSync(cmdStr, { timeout: 8000 }).toString().trim();
+    } catch (e) {
+      diag.ytdlpExecErr = e.message;
     }
   } catch (err) {
     diag.error = err.message;
@@ -52,4 +52,5 @@ export function getHealth(req, res) {
     cache: cacheService.getStats()
   });
 }
+
 

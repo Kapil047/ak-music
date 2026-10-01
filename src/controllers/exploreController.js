@@ -11,7 +11,7 @@ export async function getHomeFeed(req, res, next) {
 
     const home = await innertubePool.executeWithRetry(async (client) => {
       return await client.music.getHomeFeed();
-    });
+    }); 
 
     cacheService.set(cacheKey, home, env.CACHE_TTL_EXPLORE);
     return ApiResponse.success(res, home);
