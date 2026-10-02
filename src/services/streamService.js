@@ -32,13 +32,13 @@ export function getYtDlpCommand() {
   }
 
   // 2. Linux / Render container:
-  // Priority A: Project local python script via python3 (lightweight, zero unpack latency)
+  // Priority A: Project local standalone binary downloaded by ensure-ytdlp.js
   const localLinux = path.resolve('./bin/yt-dlp');
   if (fs.existsSync(localLinux)) {
     try {
       fs.chmodSync(localLinux, 0o755);
     } catch (_) {}
-    return { command: 'python3', argsPrefix: [localLinux] };
+    return { command: localLinux, argsPrefix: [] };
   }
 
   const localRoot = path.resolve('./yt-dlp');
@@ -46,14 +46,14 @@ export function getYtDlpCommand() {
     try {
       fs.chmodSync(localRoot, 0o755);
     } catch (_) {}
-    return { command: 'python3', argsPrefix: [localRoot] };
+    return { command: localRoot, argsPrefix: [] };
   }
 
   // Priority B: Global bin paths
   if (fs.existsSync('/usr/local/bin/yt-dlp')) return { command: '/usr/local/bin/yt-dlp', argsPrefix: [] };
   if (fs.existsSync('/usr/bin/yt-dlp')) return { command: '/usr/bin/yt-dlp', argsPrefix: [] };
 
-  // Priority C: Python module execution
+  // Priority C: Python module execution fallback
   return { command: 'python3', argsPrefix: ['-m', 'yt_dlp'] };
 }
 
@@ -68,6 +68,7 @@ export async function getYtDlpAudioUrl(videoId) {
     ...argsPrefix,
     '-g',
     '-f', 'bestaudio/ba/b',
+    '--extractor-args', 'youtube:player_client=android_vr,tv_embedded,visionos',
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificate',

@@ -8,13 +8,13 @@ const envSchema = z.object({
   PORT: z.string().default('3000').transform((val) => parseInt(val, 10)),
   
   // 🔐 Crypto
-  CRYPTO_SECRET_KEY: z.string().min(64, 'Must be a 64-hex char (32-byte) key').default('5f549ff4ff369e2f7ac5a056f59608c747aa09024a2930ebd702754de1ac12b8'),
+  CRYPTO_SECRET_KEY: z.string().min(64, 'Must be a 64-hex char (32-byte) key'),
   CRYPTO_ALGORITHM: z.string().default('aes-256-gcm'),
   CRYPTO_IV_LENGTH: z.string().default('16').transform((val) => parseInt(val, 10)),
   ENABLE_API_ENCRYPTION: z.string().default('true').transform((val) => val === 'true'),
   
   // 🔑 Auth
-  API_SECRET_KEY: z.string().min(8, 'API secret key must be at least 8 chars').default('ak_music_super_secret_key_2026'),
+  API_SECRET_KEY: z.string().min(8, 'API secret key must be at least 8 chars'),
   
   // ⏱️ Rate Limiter
   RATE_LIMIT_WINDOW_MS: z.string().default('60000').transform((val) => parseInt(val, 10)),
