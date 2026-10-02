@@ -67,7 +67,8 @@ export async function testYtDlp(req, res) {
   const args = [
     ...argsPrefix,
     '-g',
-    '-f', 'bestaudio',
+    '-f', 'bestaudio/ba/b',
+    '--extractor-args', 'youtube:player_client=android_vr,tv_embedded,visionos',
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificate',

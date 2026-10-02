@@ -32,13 +32,23 @@ export function getYtDlpCommand() {
   }
 
   // 2. Linux / Render container:
-  // Priority A: Project local standalone binary downloaded by ensure-ytdlp.js
+  // Priority A: Project local binary or Python zipapp script
   const localLinux = path.resolve('./bin/yt-dlp');
   if (fs.existsSync(localLinux)) {
     try {
       fs.chmodSync(localLinux, 0o755);
     } catch (_) {}
-    return { command: localLinux, argsPrefix: [] };
+    try {
+      const buffer = Buffer.alloc(4);
+      const fd = fs.openSync(localLinux, 'r');
+      fs.readSync(fd, buffer, 0, 4, 0);
+      fs.closeSync(fd);
+      const isElf = buffer[0] === 0x7f && buffer[1] === 0x45 && buffer[2] === 0x4c && buffer[3] === 0x46;
+      if (isElf) {
+        return { command: localLinux, argsPrefix: [] };
+      }
+    } catch (_) {}
+    return { command: 'python3', argsPrefix: [localLinux] };
   }
 
   const localRoot = path.resolve('./yt-dlp');
@@ -46,7 +56,17 @@ export function getYtDlpCommand() {
     try {
       fs.chmodSync(localRoot, 0o755);
     } catch (_) {}
-    return { command: localRoot, argsPrefix: [] };
+    try {
+      const buffer = Buffer.alloc(4);
+      const fd = fs.openSync(localRoot, 'r');
+      fs.readSync(fd, buffer, 0, 4, 0);
+      fs.closeSync(fd);
+      const isElf = buffer[0] === 0x7f && buffer[1] === 0x45 && buffer[2] === 0x4c && buffer[3] === 0x46;
+      if (isElf) {
+        return { command: localRoot, argsPrefix: [] };
+      }
+    } catch (_) {}
+    return { command: 'python3', argsPrefix: [localRoot] };
   }
 
   // Priority B: Global bin paths
