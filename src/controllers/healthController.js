@@ -67,13 +67,10 @@ export async function testYtDlp(req, res) {
   const args = [
     ...argsPrefix,
     '-g',
-    '-f', 'ba/b',
-    '--extractor-args', 'youtube:player_client=android',
+    '-f', 'bestaudio',
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificate',
-    '--socket-timeout', '10',
-    '--force-ipv4',
     `https://www.youtube.com/watch?v=${videoId}`
   ];
 

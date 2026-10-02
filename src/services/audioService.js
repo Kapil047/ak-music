@@ -79,12 +79,10 @@ export async function convertAndDownloadMp3(videoId, metadata = {}) {
         const { command: ytdlpCmd, argsPrefix } = getYtDlpCommand();
         await execFileAsync(ytdlpCmd, [
           ...argsPrefix,
-          '--extractor-args', 'youtube:player_client=android',
           '-x',
           '--audio-format', 'mp3',
           '--audio-quality', '0',
           '--ffmpeg-location', ffmpegPath,
-          '--force-ipv4',
           '-o', outputPath,
           `https://www.youtube.com/watch?v=${videoId}`
         ], { timeout: 90000 });

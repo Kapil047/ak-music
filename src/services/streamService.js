@@ -3,9 +3,9 @@ import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
+import { innertubePool } from './innertubePool.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -56,13 +56,10 @@ export async function getYtDlpAudioUrl(videoId) {
   const args = [
     ...argsPrefix,
     '-g',
-    '-f', 'ba/b',
-    '--extractor-args', 'youtube:player_client=android',
+    '-f', 'bestaudio',
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificate',
-    '--socket-timeout', '10',
-    '--force-ipv4',
     `https://www.youtube.com/watch?v=${videoId}`
   ];
 
@@ -88,90 +85,94 @@ export async function getAudioStreamInfo(videoId) {
   if (cached) return cached;
 
   const directUrl = await getYtDlpAudioUrl(videoId);
-  const result = {
-    videoId,
-    formats: [
-      {
-        itag: 251,
-        mimeType: 'audio/webm; codecs="opus"',
-        bitrate: 160000,
-        audioQuality: 'AUDIO_QUALITY_MEDIUM',
-        url: directUrl
-      }
-    ]
-  };
+  if (directUrl) {
+    const result = {
+      videoId,
+      formats: [
+        {
+          itag: 251,
+          mimeType: 'audio/webm; codecs="opus"',
+          bitrate: 160000,
+          audioQuality: 'AUDIO_QUALITY_MEDIUM',
+          url: directUrl
+        }
+      ]
+    };
+    cacheService.set(cacheKey, result, env.CACHE_TTL_STREAM);
+    return result;
+  }
 
-  cacheService.set(cacheKey, result, env.CACHE_TTL_STREAM);
-  return result;
+  // Fallback to Innertube metadata if yt-dlp did not provide direct url
+  try {
+    const info = await innertubePool.executeWithRetry(async (client) => {
+      return await client.getInfo(videoId);
+    });
+    const formats = info?.streaming_data?.adaptive_formats?.filter(f => f.has_audio) || [];
+    const bestAudio = formats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+    const url = bestAudio?.decipher?.(info.player) || bestAudio?.url;
+    if (url) {
+      const result = {
+        videoId,
+        formats: [
+          {
+            itag: bestAudio.itag || 251,
+            mimeType: bestAudio.mime_type || 'audio/webm; codecs="opus"',
+            bitrate: bestAudio.bitrate || 160000,
+            audioQuality: 'AUDIO_QUALITY_MEDIUM',
+            url
+          }
+        ]
+      };
+      cacheService.set(cacheKey, result, env.CACHE_TTL_STREAM);
+      return result;
+    }
+  } catch (err) {
+    logger.warn({ videoId, err: err.message }, 'Innertube getAudioStreamInfo fallback failed');
+  }
+
+  return null;
 }
 
 /**
- * Streams audio to client by proxying chunks with full Range (HTTP 206) seek support.
- * This guarantees playback works on mobile clients without Google Video 403 Forbidden IP-mismatch errors.
+ * Streams audio to client:
+ * 1. Primary: Direct 302 Redirect to YouTube Google Video CDN (zero server RAM/CPU, max speed).
+ * 2. Secondary fallback: Innertube stream pipe (handles cases where yt-dlp triggers bot checks on cloud IP).
  */
 export async function pipeAudioStream(videoId, req, res) {
+  // 1. Primary: yt-dlp direct CDN redirect
   const directUrl = await getYtDlpAudioUrl(videoId);
-  if (!directUrl) {
-    throw new Error('Failed to resolve audio stream URL');
+  if (directUrl) {
+    return res.redirect(directUrl);
   }
 
+  // 2. Secondary fallback: Innertube stream pipe
   try {
-    const upstreamHeaders = {};
-    if (req.headers.range) {
-      upstreamHeaders['Range'] = req.headers.range;
-    }
-
-    const response = await axios.get(directUrl, {
-      headers: upstreamHeaders,
-      responseType: 'stream',
-      validateStatus: (status) => status >= 200 && status < 400,
-      timeout: 15000
-    });
-
-    res.status(response.status);
-
-    const headersToForward = [
-      'content-type',
-      'content-length',
-      'content-range',
-      'accept-ranges',
-      'cache-control'
-    ];
-
-    for (const header of headersToForward) {
-      if (response.headers[header]) {
-        res.setHeader(header, response.headers[header]);
-      }
-    }
-
-    if (!res.getHeader('accept-ranges')) {
-      res.setHeader('Accept-Ranges', 'bytes');
-    }
-
-    // Pipe stream directly to client response
-    response.data.pipe(res);
-
-    req.on('close', () => {
-      if (!res.writableEnded) {
-        response.data.destroy();
-      }
-    });
-  } catch (err) {
-    // If upstream Google Video link was expired (403/410), clear cached link for fresh retry
-    if (err.response && (err.response.status === 403 || err.response.status === 410)) {
-      cacheService.del(`ytdlp_url:${videoId}`);
-    }
-
-    logger.error({ videoId, err: err.message }, 'Failed to proxy audio stream');
-
-    if (!res.headersSent) {
-      res.status(502).json({
-        success: false,
-        error: { code: 'ERR_STREAM_PROXY', message: 'Failed to stream audio from source' }
+    logger.info({ videoId }, 'yt-dlp failed or blocked, falling back to Innertube stream');
+    const stream = await innertubePool.executeWithRetry(async (client) => {
+      return await client.download(videoId, {
+        type: 'audio',
+        quality: 'best'
       });
-    }
+    });
+
+    res.setHeader('Content-Type', 'audio/webm');
+    res.setHeader('Accept-Ranges', 'none');
+
+    const reader = stream.getReader();
+    const pump = async () => {
+      const { done, value } = await reader.read();
+      if (done) return res.end();
+      if (!res.write(value)) res.once('drain', pump);
+      else pump();
+    };
+    return pump();
+  } catch (err) {
+    logger.error({ videoId, err: err.message }, 'All audio streaming methods failed');
   }
+
+  throw new Error('Failed to resolve audio stream URL');
 }
+
 
 
 

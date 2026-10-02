@@ -40,12 +40,25 @@ export async function searchSongs(req, res, next) {
           bestThumb = bestThumb.replace(/=w\d+-h\d+/, '=w800-h800').replace(/=s\d+/, '=s800');
         }
       }
+      const extractedTitle = typeof item.title === 'string' 
+        ? item.title 
+        : (item.title?.text || item.title?.runs?.[0]?.text || item.name || 'Unknown Title');
+
+      let extractedArtists = [];
+      if (Array.isArray(item.artists) && item.artists.length > 0) {
+        extractedArtists = item.artists.map((a) => (typeof a === 'string' ? a : a.name || a.text || ''));
+      } else if (Array.isArray(item.authors) && item.authors.length > 0) {
+        extractedArtists = item.authors.map((a) => (typeof a === 'string' ? a : a.name || a.text || ''));
+      } else if (item.author) {
+        extractedArtists = [typeof item.author === 'string' ? item.author : item.author.name || ''];
+      }
+
       return {
         id: item.id || item.videoId || '',
-        title: typeof item.title === 'string' ? item.title : (item.title?.text || item.title?.runs?.[0]?.text || 'Unknown Title'),
-        artists: item.artists ? item.artists.map((a) => (typeof a === 'string' ? a : a.name || a.text || '')) : [],
+        title: extractedTitle,
+        artists: extractedArtists.filter(Boolean),
         album: item.album ? (typeof item.album === 'string' ? item.album : item.album.name || item.album.text || null) : null,
-        duration: item.duration ? (typeof item.duration.seconds === 'number' ? item.duration.seconds : 0) : 0,
+        duration: item.duration ? (typeof item.duration.seconds === 'number' ? item.duration.seconds : (typeof item.duration === 'number' ? item.duration : 0)) : 0,
         thumbnail: bestThumb,
         thumbnails: thumbs
       };
