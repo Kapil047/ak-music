@@ -101,8 +101,9 @@ export async function getYtDlpAudioUrl(videoId) {
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificate',
-    '--socket-timeout', '30',
-    '--retries', '3',
+    '--force-ipv4',
+    '--socket-timeout', '15',
+    '--retries', '2',
     `https://www.youtube.com/watch?v=${videoId}`
   ];
 

@@ -1,7 +1,12 @@
 import express from 'express';
+import dns from 'dns';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
+
+// Force IPv4 resolution first on Linux/Render to eliminate 20-30s IPv6 connect timeouts
+dns.setDefaultResultOrder('ipv4first');
+
 import { env } from './config/env.js';
 import { requestIdMiddleware } from './middlewares/requestId.js';
 import { globalLimiter } from './middlewares/rateLimiter.js';

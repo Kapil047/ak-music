@@ -72,6 +72,7 @@ export async function testYtDlp(req, res) {
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificate',
+    '--force-ipv4',
     '--socket-timeout', '15',
     '--retries', '2',
     `https://www.youtube.com/watch?v=${videoId}`
