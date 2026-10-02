@@ -12,6 +12,9 @@ import { apiRouter } from './routes/index.js';
 
 export const app = express();
 
+// Enable trust proxy for Render / Cloudflare reverse proxy headers (fixes express-rate-limit ERR_ERL_UNEXPECTED_X_FORWARDED_FOR)
+app.set('trust proxy', 1);
+
 // 1. Security & Optimizations
 app.use(helmet());
 app.use(cors());
