@@ -3,11 +3,22 @@ import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import { innertubePool } from './innertubePool.js';
 
 const execFileAsync = promisify(execFile);
+
+// YouTube stream headers required by Google Video CDN to prevent 403 Forbidden
+const YT_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Accept': '*/*',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Origin': 'https://www.youtube.com',
+  'Referer': 'https://www.youtube.com/',
+  'Connection': 'keep-alive',
+};
 
 /**
  * Returns command and arguments prefix for executing yt-dlp across Windows, Linux, and Render cloud containers
@@ -56,16 +67,18 @@ export async function getYtDlpAudioUrl(videoId) {
   const args = [
     ...argsPrefix,
     '-g',
-    '-f', 'bestaudio',
+    '-f', 'bestaudio/ba/b',
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificate',
+    '--socket-timeout', '30',
+    '--retries', '3',
     `https://www.youtube.com/watch?v=${videoId}`
   ];
 
   try {
-    const { stdout, stderr } = await execFileAsync(command, args, { timeout: 25000 });
-    const url = stdout.trim();
+    const { stdout, stderr } = await execFileAsync(command, args, { timeout: 35000 });
+    const url = stdout.trim().split('\n')[0];
     if (url && url.startsWith('http')) {
       cacheService.set(cacheKey, url, 14400); // Cache for 4 hours
       return url;
@@ -78,6 +91,8 @@ export async function getYtDlpAudioUrl(videoId) {
   }
   return null;
 }
+
+export const getStreamUrl = getYtDlpAudioUrl;
 
 export async function getAudioStreamInfo(videoId) {
   const cacheKey = `stream_info:${videoId}`;
@@ -134,44 +149,94 @@ export async function getAudioStreamInfo(videoId) {
 }
 
 /**
- * Streams audio to client:
- * 1. Primary: Direct 302 Redirect to YouTube Google Video CDN (zero server RAM/CPU, max speed).
- * 2. Secondary fallback: Innertube stream pipe (handles cases where yt-dlp triggers bot checks on cloud IP).
+ * Streams audio to client with full HTTP Range (206) seek support, YouTube CDN headers,
+ * and automatic memory cleanup on client disconnect.
  */
 export async function pipeAudioStream(videoId, req, res) {
-  // 1. Primary: yt-dlp direct CDN redirect
+  const mode = req.query.mode || 'proxy';
   const directUrl = await getYtDlpAudioUrl(videoId);
-  if (directUrl) {
-    return res.redirect(directUrl);
+
+  if (!directUrl) {
+    return res.status(503).json({
+      success: false,
+      error: { code: 'ERR_STREAM_UNAVAILABLE', message: 'Could not resolve audio stream URL' }
+    });
   }
 
-  // 2. Secondary fallback: Innertube stream pipe
+  // 1. Direct Redirect Mode (zero server bandwidth, fastest if client IP matches)
+  if (mode === 'redirect') {
+    return res.redirect(302, directUrl);
+  }
+
+  // 2. Proxy Streaming Mode (Default — Solves 403 Forbidden & IP mismatch errors)
   try {
-    logger.info({ videoId }, 'yt-dlp failed or blocked, falling back to Innertube stream');
-    const stream = await innertubePool.executeWithRetry(async (client) => {
-      return await client.download(videoId, {
-        type: 'audio',
-        quality: 'best'
-      });
+    const upstreamHeaders = { ...YT_HEADERS };
+    if (req.headers.range) {
+      upstreamHeaders['Range'] = req.headers.range;
+    }
+
+    const upstream = await axios.get(directUrl, {
+      headers: upstreamHeaders,
+      responseType: 'stream',
+      timeout: 30000,
+      maxRedirects: 5,
+      validateStatus: (s) => s >= 200 && s < 400,
     });
 
-    res.setHeader('Content-Type', 'audio/webm');
-    res.setHeader('Accept-Ranges', 'none');
+    res.status(upstream.status);
+    res.setHeader('Content-Type', upstream.headers['content-type'] || 'audio/webm');
+    res.setHeader('Accept-Ranges', 'bytes');
 
-    const reader = stream.getReader();
-    const pump = async () => {
-      const { done, value } = await reader.read();
-      if (done) return res.end();
-      if (!res.write(value)) res.once('drain', pump);
-      else pump();
-    };
-    return pump();
+    if (upstream.headers['content-length']) {
+      res.setHeader('Content-Length', upstream.headers['content-length']);
+    }
+    if (upstream.headers['content-range']) {
+      res.setHeader('Content-Range', upstream.headers['content-range']);
+    }
+
+    // Pipe audio stream to client
+    upstream.data.pipe(res);
+
+    // Client abort/disconnect handler — kills upstream immediately to prevent memory leak
+    res.on('close', () => {
+      if (!upstream.data.destroyed) {
+        upstream.data.destroy();
+      }
+    });
+
+    upstream.data.on('error', (err) => {
+      logger.error({ videoId, err: err.message }, 'Upstream stream piping error');
+      if (!res.headersSent) {
+        res.status(502).json({
+          success: false,
+          error: { code: 'ERR_STREAM_PIPE', message: 'Failed to pipe upstream audio' }
+        });
+      } else {
+        res.end();
+      }
+    });
   } catch (err) {
-    logger.error({ videoId, err: err.message }, 'All audio streaming methods failed');
-  }
+    // If upstream link expired (403/410), clear cache for next request
+    if (err.response?.status === 403 || err.response?.status === 410) {
+      cacheService.del(`ytdlp_url:${videoId}`);
+      if (!res.headersSent) {
+        return res.status(503).json({
+          success: false,
+          error: { code: 'ERR_YT_BLOCKED', message: 'Upstream YouTube stream expired or blocked, refresh cache' }
+        });
+      }
+    }
 
-  throw new Error('Failed to resolve audio stream URL');
+    logger.error({ videoId, err: err.message }, 'Failed to stream audio');
+    if (!res.headersSent) {
+      res.status(502).json({
+        success: false,
+        error: { code: 'ERR_STREAM_PROXY', message: 'Failed to proxy audio stream' }
+      });
+    }
+  }
 }
+
 
 
 
