@@ -79,6 +79,7 @@ export async function convertAndDownloadMp3(videoId, metadata = {}) {
         const { command: ytdlpCmd, argsPrefix } = getYtDlpCommand();
         await execFileAsync(ytdlpCmd, [
           ...argsPrefix,
+          '--extractor-args', 'youtube:player_client=android',
           '-x',
           '--audio-format', 'mp3',
           '--audio-quality', '0',

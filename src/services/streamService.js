@@ -56,7 +56,8 @@ export async function getYtDlpAudioUrl(videoId) {
   const args = [
     ...argsPrefix,
     '-g',
-    '-f', 'bestaudio/ba/b',
+    '-f', 'ba/b',
+    '--extractor-args', 'youtube:player_client=android',
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificate',
