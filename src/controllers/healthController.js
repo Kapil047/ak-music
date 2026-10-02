@@ -2,7 +2,7 @@ import { cacheService } from '../services/cacheService.js';
 import { innertubePool } from '../services/innertubePool.js';
 import { ApiResponse } from '../utils/apiResponse.js';
 import { getYtDlpCommand } from '../services/streamService.js';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -21,12 +21,12 @@ function refreshDiagnostics() {
     const { command, argsPrefix } = getYtDlpCommand();
     diag.ytdlpTarget = `${command} ${argsPrefix.join(' ')}`.trim();
 
-    const cmdStr = argsPrefix.length > 0 ? `"${command}" ${argsPrefix.join(' ')} --version` : `"${command}" --version`;
-    exec(cmdStr, { timeout: 10000 }, (err, stdout) => {
+    execFile(command, [...argsPrefix, '--version'], { timeout: 10000 }, (err, stdout, stderr) => {
       if (!err && stdout) {
         diag.ytdlpVersion = stdout.trim();
       } else if (err) {
         diag.ytdlpExecErr = err.message;
+        diag.ytdlpStderr = stderr ? stderr.trim() : null;
       }
       cachedDiagnostics = diag;
     });
@@ -72,6 +72,8 @@ export async function testYtDlp(req, res) {
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificate',
+    '--socket-timeout', '15',
+    '--retries', '2',
     `https://www.youtube.com/watch?v=${videoId}`
   ];
 

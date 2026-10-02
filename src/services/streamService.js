@@ -26,8 +26,17 @@ const YT_HEADERS = {
 export function getYtDlpCommand() {
   // 1. Windows specific path
   if (process.platform === 'win32') {
-    const winPath = 'C:\\Users\\RYZEN 4750\\AppData\\Roaming\\Python\\Python313\\Scripts\\yt-dlp.exe';
-    if (fs.existsSync(winPath)) return { command: winPath, argsPrefix: [] };
+    const candidates = [
+      process.env.YTDLP_PATH_WINDOWS,
+      'C:\\Users\\RYZEN 4750\\AppData\\Roaming\\Python\\Python313\\Scripts\\yt-dlp.exe',
+      process.env.APPDATA ? path.join(process.env.APPDATA, 'Python', 'Python313', 'Scripts', 'yt-dlp.exe') : null,
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'Python', 'Python313', 'Scripts', 'yt-dlp.exe') : null,
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'Python', 'Python312', 'Scripts', 'yt-dlp.exe') : null,
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'Python', 'Python311', 'Scripts', 'yt-dlp.exe') : null
+    ];
+    for (const p of candidates) {
+      if (p && fs.existsSync(p)) return { command: p, argsPrefix: [] };
+    }
     return { command: 'yt-dlp.exe', argsPrefix: [] };
   }
 
@@ -121,52 +130,35 @@ export async function getAudioStreamInfo(videoId) {
   if (cached) return cached;
 
   const directUrl = await getYtDlpAudioUrl(videoId);
-  if (directUrl) {
-    const result = {
-      videoId,
-      formats: [
-        {
-          itag: 251,
-          mimeType: 'audio/webm; codecs="opus"',
-          bitrate: 160000,
-          audioQuality: 'AUDIO_QUALITY_MEDIUM',
-          url: directUrl
-        }
-      ]
-    };
-    cacheService.set(cacheKey, result, env.CACHE_TTL_STREAM);
-    return result;
-  }
+  if (!directUrl) return null;
 
-  // Fallback to Innertube metadata if yt-dlp did not provide direct url
-  try {
-    const info = await innertubePool.executeWithRetry(async (client) => {
-      return await client.getInfo(videoId);
-    });
-    const formats = info?.streaming_data?.adaptive_formats?.filter(f => f.has_audio) || [];
-    const bestAudio = formats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-    const url = bestAudio?.decipher?.(info.player) || bestAudio?.url;
-    if (url) {
-      const result = {
-        videoId,
-        formats: [
-          {
-            itag: bestAudio.itag || 251,
-            mimeType: bestAudio.mime_type || 'audio/webm; codecs="opus"',
-            bitrate: bestAudio.bitrate || 160000,
-            audioQuality: 'AUDIO_QUALITY_MEDIUM',
-            url
-          }
-        ]
-      };
-      cacheService.set(cacheKey, result, env.CACHE_TTL_STREAM);
-      return result;
-    }
-  } catch (err) {
-    logger.warn({ videoId, err: err.message }, 'Innertube getAudioStreamInfo fallback failed');
-  }
+  const result = {
+    videoId,
+    formats: [
+      {
+        itag: 251,
+        mimeType: 'audio/webm; codecs="opus"',
+        bitrate: 160000,
+        audioQuality: 'AUDIO_QUALITY_MEDIUM',
+        url: directUrl
+      }
+    ]
+  };
 
-  return null;
+  cacheService.set(cacheKey, result, env.CACHE_TTL_STREAM);
+  return result;
+}
+
+export async function prewarmStreamUrls(videoIds = []) {
+  if (!Array.isArray(videoIds) || videoIds.length === 0) {
+    return { requested: 0, warmed: 0 };
+  }
+  const uniqueIds = [...new Set(videoIds)].slice(0, 10);
+  const results = await Promise.allSettled(
+    uniqueIds.map((id) => getYtDlpAudioUrl(id))
+  );
+  const successCount = results.filter((r) => r.status === 'fulfilled' && r.value).length;
+  return { requested: uniqueIds.length, warmed: successCount };
 }
 
 /**
