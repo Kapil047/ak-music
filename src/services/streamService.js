@@ -11,14 +11,40 @@ import { innertubePool } from './innertubePool.js';
 const execFileAsync = promisify(execFile);
 
 // YouTube stream headers required by Google Video CDN to prevent 403 Forbidden
-const YT_HEADERS = {
+export const YT_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
   'Accept': '*/*',
   'Accept-Language': 'en-US,en;q=0.9',
   'Origin': 'https://www.youtube.com',
   'Referer': 'https://www.youtube.com/',
+  'Sec-Fetch-Dest': 'audio',
+  'Sec-Fetch-Mode': 'no-cors',
+  'Sec-Fetch-Site': 'cross-site',
   'Connection': 'keep-alive',
 };
+
+/**
+ * Auto-detects yt-dlp cookies.txt and logs warning if older than 60 days
+ */
+export function getCookieArgs() {
+  const cookiePath = env.YTDLP_COOKIES_PATH
+    ? path.resolve(env.YTDLP_COOKIES_PATH)
+    : path.resolve('./cookies/cookies.txt');
+
+  if (!fs.existsSync(cookiePath)) {
+    return [];
+  }
+
+  try {
+    const stats = fs.statSync(cookiePath);
+    const daysOld = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60 * 24);
+    if (daysOld > 60) {
+      logger.warn({ daysOld: Math.floor(daysOld), cookiePath }, 'yt-dlp cookies are older than 60 days — re-export recommended');
+    }
+  } catch (_) {}
+
+  return ['--cookies', cookiePath];
+}
 
 /**
  * Returns command and arguments prefix for executing yt-dlp across Windows, Linux, and Render cloud containers
@@ -98,12 +124,12 @@ export async function getYtDlpAudioUrl(videoId) {
     '-g',
     '-f', 'bestaudio/ba/b',
     '--extractor-args', 'youtube:player_client=android_vr,tv_embedded,visionos',
+    ...getCookieArgs(),
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificate',
-    '--force-ipv4',
-    '--socket-timeout', '15',
-    '--retries', '2',
+    '--socket-timeout', '30',
+    '--retries', '3',
     `https://www.youtube.com/watch?v=${videoId}`
   ];
 
@@ -123,14 +149,53 @@ export async function getYtDlpAudioUrl(videoId) {
   return null;
 }
 
-export const getStreamUrl = getYtDlpAudioUrl;
+export async function getStreamUrlViaInnertube(videoId) {
+  try {
+    return await innertubePool.executeWithRetry(async (client) => {
+      const info = await client.getInfo(videoId);
+      const format = info.chooseFormat({ type: 'audio', quality: 'best' });
+      if (!format) return null;
+      if (format.decipher) {
+        return await format.decipher(client.session.player);
+      }
+      return format.url || null;
+    });
+  } catch (err) {
+    logger.warn({ videoId, err: err.message }, 'Innertube direct stream extraction failed, falling back');
+    return null;
+  }
+}
+
+export async function getStreamUrl(videoId) {
+  const cacheKey = `stream:${videoId}`;
+  const cached = cacheService.get(cacheKey);
+  if (cached) return cached;
+
+  // PRIORITY 1: Authenticated Innertube (Fastest, zero subprocess overhead)
+  const innertubeUrl = await getStreamUrlViaInnertube(videoId);
+  if (innertubeUrl) {
+    cacheService.set(cacheKey, innertubeUrl, 14400);
+    logger.info({ videoId, source: 'innertube-oauth' }, 'Audio stream URL resolved');
+    return innertubeUrl;
+  }
+
+  // PRIORITY 2: yt-dlp with cookies (Reliable fallback)
+  const ytdlpUrl = await getYtDlpAudioUrl(videoId);
+  if (ytdlpUrl) {
+    cacheService.set(cacheKey, ytdlpUrl, 14400);
+    logger.info({ videoId, source: 'yt-dlp' }, 'Audio stream URL resolved');
+    return ytdlpUrl;
+  }
+
+  return null;
+}
 
 export async function getAudioStreamInfo(videoId) {
   const cacheKey = `stream_info:${videoId}`;
   const cached = cacheService.get(cacheKey);
   if (cached) return cached;
 
-  const directUrl = await getYtDlpAudioUrl(videoId);
+  const directUrl = await getStreamUrl(videoId);
   if (!directUrl) return null;
 
   const result = {
@@ -156,7 +221,7 @@ export async function prewarmStreamUrls(videoIds = []) {
   }
   const uniqueIds = [...new Set(videoIds)].slice(0, 10);
   const results = await Promise.allSettled(
-    uniqueIds.map((id) => getYtDlpAudioUrl(id))
+    uniqueIds.map((id) => getStreamUrl(id))
   );
   const successCount = results.filter((r) => r.status === 'fulfilled' && r.value).length;
   return { requested: uniqueIds.length, warmed: successCount };
@@ -168,7 +233,7 @@ export async function prewarmStreamUrls(videoIds = []) {
  */
 export async function pipeAudioStream(videoId, req, res) {
   const mode = req.query.mode || 'proxy';
-  const directUrl = await getYtDlpAudioUrl(videoId);
+  const directUrl = await getStreamUrl(videoId);
 
   if (!directUrl) {
     return res.status(503).json({
@@ -207,6 +272,10 @@ export async function pipeAudioStream(videoId, req, res) {
     if (upstream.headers['content-range']) {
       res.setHeader('Content-Range', upstream.headers['content-range']);
     }
+    if (upstream.headers['etag']) {
+      res.setHeader('ETag', upstream.headers['etag']);
+      res.setHeader('Cache-Control', 'public, max-age=14400');
+    }
 
     // Pipe audio stream to client
     upstream.data.pipe(res);
@@ -233,10 +302,11 @@ export async function pipeAudioStream(videoId, req, res) {
     // If upstream link expired (403/410), clear cache for next request
     if (err.response?.status === 403 || err.response?.status === 410) {
       cacheService.del(`ytdlp_url:${videoId}`);
+      cacheService.del(`stream:${videoId}`);
       if (!res.headersSent) {
         return res.status(503).json({
           success: false,
-          error: { code: 'ERR_YT_BLOCKED', message: 'Upstream YouTube stream expired or blocked, refresh cache' }
+          error: { code: 'ERR_YT_BLOCKED', message: 'Upstream YouTube stream expired or blocked, refresh cache', retryable: true }
         });
       }
     }

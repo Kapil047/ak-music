@@ -1,6 +1,7 @@
-﻿import { Innertube, UniversalCache } from 'youtubei.js';
+import { Innertube, UniversalCache } from 'youtubei.js';
 import { logger } from '../utils/logger.js';
 import { CLIENT_PROFILES } from '../config/constants.js';
+import { loadTokens } from './youtubeAuthService.js';
 
 class InnertubePool {
   constructor() {
@@ -22,6 +23,23 @@ class InnertubePool {
           client_type: profile
         });
 
+        // 📺 OAuth Injection for TVHTML5 (YMusic Engine)
+        if (profile === 'TVHTML5') {
+          const tokens = loadTokens();
+          if (tokens && tokens.access_token) {
+            try {
+              await client.session.signIn({
+                access_token: tokens.access_token,
+                refresh_token: tokens.refresh_token,
+                expiry_date: new Date(tokens.expires_at).toISOString()
+              });
+              logger.info('📺 TVHTML5 client authenticated with saved YouTube OAuth session');
+            } catch (authErr) {
+              logger.warn({ err: authErr.message }, 'Could not sign in TVHTML5 client with stored OAuth token');
+            }
+          }
+        }
+
         this.clients.set(profile, client);
         logger.info({ profile }, `Registered Innertube profile: ${profile}`);
       } catch (err) {
@@ -38,6 +56,26 @@ class InnertubePool {
 
     this.isInitialized = true;
     logger.info(`Innertube Pool initialized with ${this.clients.size} active clients`);
+  }
+
+  async syncOAuthSession() {
+    const tvClient = this.clients.get('TVHTML5');
+    if (!tvClient) return false;
+    const tokens = loadTokens();
+    if (!tokens || !tokens.access_token) return false;
+
+    try {
+      await tvClient.session.signIn({
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        expiry_date: new Date(tokens.expires_at).toISOString()
+      });
+      logger.info('📺 TVHTML5 client dynamically authenticated with new OAuth session');
+      return true;
+    } catch (err) {
+      logger.warn({ err: err.message }, 'Failed to dynamically sync TVHTML5 OAuth session');
+      return false;
+    }
   }
 
   getClient() {

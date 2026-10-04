@@ -10,7 +10,7 @@ import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { getYtDlpCommand } from './streamService.js';
+import { getYtDlpCommand, getCookieArgs } from './streamService.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -79,6 +79,7 @@ export async function convertAndDownloadMp3(videoId, metadata = {}) {
         const { command: ytdlpCmd, argsPrefix } = getYtDlpCommand();
         await execFileAsync(ytdlpCmd, [
           ...argsPrefix,
+          ...getCookieArgs(),
           '-x',
           '--audio-format', 'mp3',
           '--audio-quality', '0',

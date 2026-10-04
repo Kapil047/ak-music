@@ -1,7 +1,9 @@
 import { cacheService } from '../services/cacheService.js';
 import { innertubePool } from '../services/innertubePool.js';
 import { ApiResponse } from '../utils/apiResponse.js';
-import { getYtDlpCommand } from '../services/streamService.js';
+import { getYtDlpCommand, getCookieArgs } from '../services/streamService.js';
+import { getAuthStatus } from '../services/youtubeAuthService.js';
+import { env } from '../config/env.js';
 import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -41,11 +43,28 @@ setTimeout(refreshDiagnostics, 1500);
 
 export function getHealth(req, res) {
   const memory = process.memoryUsage();
+  const cookiePath = env.YTDLP_COOKIES_PATH
+    ? path.resolve(env.YTDLP_COOKIES_PATH)
+    : path.resolve('./cookies/cookies.txt');
+  const cookieExists = fs.existsSync(cookiePath);
+  let cookieDaysOld = null;
+  if (cookieExists) {
+    try {
+      const stats = fs.statSync(cookiePath);
+      cookieDaysOld = Math.floor((Date.now() - stats.mtimeMs) / (1000 * 60 * 60 * 24));
+    } catch (_) {}
+  }
 
   return ApiResponse.success(res, {
     status: 'healthy',
     uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
+    oauth: getAuthStatus(),
+    cookies: {
+      configuredPath: env.YTDLP_COOKIES_PATH,
+      exists: cookieExists,
+      daysOld: cookieDaysOld
+    },
     diagnostics: cachedDiagnostics,
     memory: {
       rssMb: Math.round(memory.rss / 1024 / 1024),
@@ -69,12 +88,12 @@ export async function testYtDlp(req, res) {
     '-g',
     '-f', 'bestaudio/ba/b',
     '--extractor-args', 'youtube:player_client=android_vr,tv_embedded,visionos',
+    ...getCookieArgs(),
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificate',
-    '--force-ipv4',
-    '--socket-timeout', '15',
-    '--retries', '2',
+    '--socket-timeout', '30',
+    '--retries', '3',
     `https://www.youtube.com/watch?v=${videoId}`
   ];
 
@@ -82,7 +101,7 @@ export async function testYtDlp(req, res) {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
     const execFileAsync = promisify(execFile);
-    const { stdout, stderr } = await execFileAsync(command, args, { timeout: 20000 });
+    const { stdout, stderr } = await execFileAsync(command, args, { timeout: 35000 });
     return res.json({
       success: true,
       durationMs: Date.now() - start,

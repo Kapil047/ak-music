@@ -29,8 +29,14 @@ const envSchema = z.object({
   
   // 🎬 Downloads
   MAX_CONCURRENT_DOWNLOADS: z.string().default('3').transform((val) => parseInt(val, 10)),
-  DOWNLOAD_TEMP_DIR: z.string().default('./temp/downloads')
+  DOWNLOAD_TEMP_DIR: z.string().default('./temp/downloads'),
+
+  // 🍪 YMusic TVHTML5 OAuth & Cookies
+  YTDLP_COOKIES_PATH: z.string().default('./cookies/cookies.txt'),
+  TVHTML5_CLIENT_ID: z.string().default('861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com'),
+  TVHTML5_CLIENT_SECRET: z.string().default('SboVquzB-bqB1_wRFLNYLpJvYVQx3aF6')
 });
+
 
 const parsed = envSchema.safeParse(process.env);
 
