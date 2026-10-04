@@ -1,13 +1,17 @@
-﻿import { app } from './app.js';
+import { app } from './app.js';
 import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { innertubePool } from './services/innertubePool.js';
+import { restoreTokensFromFirestore } from './services/youtubeAuthService.js';
 
 async function bootstrap() {
   try {
     logger.info('Starting ak-music engine bootstrap...');
 
-    // 1. Initialize Innertube Anti-Ban Pool
+    // 1. Restore OAuth tokens from Cloud Firestore if container freshly booted
+    await restoreTokensFromFirestore();
+
+    // 2. Initialize Innertube Anti-Ban Pool (will auto-bind TVHTML5 OAuth if restored)
     await innertubePool.initialize();
 
     // 2. Start HTTP Server

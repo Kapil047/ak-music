@@ -31,6 +31,25 @@ export function getCookieArgs() {
     ? path.resolve(env.YTDLP_COOKIES_PATH)
     : path.resolve('./cookies/cookies.txt');
 
+  // Auto-restore cookies from environment variable on Render if file doesn't exist yet
+  if (!fs.existsSync(cookiePath)) {
+    if (process.env.YTDLP_COOKIES_TEXT) {
+      try {
+        const cookieDir = path.dirname(cookiePath);
+        if (!fs.existsSync(cookieDir)) fs.mkdirSync(cookieDir, { recursive: true });
+        fs.writeFileSync(cookiePath, process.env.YTDLP_COOKIES_TEXT, 'utf8');
+        logger.info('Restored cookies.txt from YTDLP_COOKIES_TEXT environment variable');
+      } catch (_) {}
+    } else if (process.env.YTDLP_COOKIES_BASE64) {
+      try {
+        const cookieDir = path.dirname(cookiePath);
+        if (!fs.existsSync(cookieDir)) fs.mkdirSync(cookieDir, { recursive: true });
+        fs.writeFileSync(cookiePath, Buffer.from(process.env.YTDLP_COOKIES_BASE64, 'base64').toString('utf8'), 'utf8');
+        logger.info('Restored cookies.txt from YTDLP_COOKIES_BASE64 environment variable');
+      } catch (_) {}
+    }
+  }
+
   if (!fs.existsSync(cookiePath)) {
     return [];
   }

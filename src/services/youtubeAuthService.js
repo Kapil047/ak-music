@@ -14,8 +14,17 @@ let refreshPromise = null;
 const TOKEN_DIR = path.dirname(OAUTH_CONFIG.tokenStoragePath);
 const TOKEN_FILE = OAUTH_CONFIG.tokenStoragePath;
 
+// Dynamic Firestore helper to keep test runners decoupled from heavy SDK loaders
+async function getFirestoreDb() {
+  try {
+    const { db, isFirebaseReady } = await import('../config/firebase.js');
+    if (isFirebaseReady && db) return db;
+  } catch (_) {}
+  return null;
+}
+
 // ─────────────────────────────────────────────
-// STORAGE (Encrypted with existing AES-256-GCM crypto.js)
+// STORAGE (Encrypted with existing AES-256-GCM crypto.js & Cloud Firestore sync)
 // ─────────────────────────────────────────────
 function ensureDir() {
   if (!fs.existsSync(TOKEN_DIR)) {
@@ -28,6 +37,44 @@ export function saveTokens(tokens) {
   const encrypted = encryptData(tokens);
   fs.writeFileSync(TOKEN_FILE, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
   logger.info('OAuth tokens encrypted and stored securely');
+
+  // Cloud Firestore Sync: Survives Render Free Tier container restarts & spin-downs
+  getFirestoreDb().then((db) => {
+    if (db) {
+      db.collection('system_config').doc('youtube_oauth').set({
+        ...encrypted,
+        updatedAt: Date.now()
+      }).then(() => {
+        logger.info('OAuth tokens backed up to Cloud Firestore (Render cloud persistence enabled)');
+      }).catch((err) => {
+        logger.warn({ err: err.message }, 'Failed to backup OAuth tokens to Firestore');
+      });
+    }
+  });
+}
+
+export async function restoreTokensFromFirestore() {
+  if (fs.existsSync(TOKEN_FILE)) return;
+  const db = await getFirestoreDb();
+  if (!db) return;
+
+  try {
+    const doc = await db.collection('system_config').doc('youtube_oauth').get();
+    if (doc.exists) {
+      const data = doc.data();
+      if (data && data.payload && data.iv && data.authTag) {
+        ensureDir();
+        fs.writeFileSync(TOKEN_FILE, JSON.stringify({
+          payload: data.payload,
+          iv: data.iv,
+          authTag: data.authTag
+        }, null, 2), { mode: 0o600 });
+        logger.info('Restored OAuth tokens from Cloud Firestore onto disk');
+      }
+    }
+  } catch (err) {
+    logger.warn({ err: err.message }, 'Could not restore OAuth tokens from Firestore');
+  }
 }
 
 export function loadTokens() {
@@ -208,6 +255,9 @@ export function logout() {
       fs.unlinkSync(TOKEN_FILE);
     } catch (_) {}
   }
+  getFirestoreDb().then((db) => {
+    if (db) db.collection('system_config').doc('youtube_oauth').delete().catch(() => {});
+  });
   refreshPromise = null;
   logger.info('YouTube OAuth session cleared');
 }
