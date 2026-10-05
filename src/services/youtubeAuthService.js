@@ -126,30 +126,48 @@ export async function pollForToken(deviceCode, intervalSec = 5, expiresInSec = 1
     await new Promise((resolve) => setTimeout(resolve, pollInterval * 1000));
 
     try {
-      const params = new URLSearchParams();
-      params.append('client_id', OAUTH_CONFIG.clientId);
-      params.append('client_secret', OAUTH_CONFIG.clientSecret);
-      params.append('code', deviceCode);
-      params.append('grant_type', 'urn:ietf:params:oauth:grant-type:device_code');
+      const payload = {
+        client_id: OAUTH_CONFIG.clientId,
+        client_secret: OAUTH_CONFIG.clientSecret,
+        code: deviceCode,
+        grant_type: 'http://oauth.net/grant_type/device/1.0'
+      };
 
-      const { data } = await axios.post(OAUTH_CONFIG.tokenUrl, params.toString(), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      const { data } = await axios.post(OAUTH_CONFIG.tokenUrl, payload, {
+        headers: { 'Content-Type': 'application/json' },
         timeout: 15000
       });
 
-      const tokens = {
-        access_token: data.access_token,
-        refresh_token: data.refresh_token,
-        token_type: data.token_type || 'Bearer',
-        expires_at: Date.now() + (data.expires_in * 1000),
-        refresh_expires_at: Date.now() + (90 * 24 * 60 * 60 * 1000), // 90 days
-        created_at: Date.now(),
-        last_refreshed: Date.now()
-      };
+      if (data && data.error) {
+        if (data.error === 'authorization_pending') {
+          continue;
+        }
+        if (data.error === 'slow_down') {
+          pollInterval += 5;
+          continue;
+        }
+        if (data.error === 'expired_token' || data.error === 'access_denied') {
+          logger.warn({ error: data.error }, 'OAuth device code polling terminated');
+          throw new Error(`OAuth authorization ended: ${data.error}`);
+        }
+        throw new Error(`OAuth error: ${data.error}`);
+      }
 
-      saveTokens(tokens);
-      logger.info('OAuth TVHTML5 login successful! Tokens stored.');
-      return tokens;
+      if (data && data.access_token) {
+        const tokens = {
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
+          token_type: data.token_type || 'Bearer',
+          expires_at: Date.now() + (data.expires_in * 1000),
+          refresh_expires_at: Date.now() + (90 * 24 * 60 * 60 * 1000), // 90 days
+          created_at: Date.now(),
+          last_refreshed: Date.now()
+        };
+
+        saveTokens(tokens);
+        logger.info('OAuth TVHTML5 login successful! Tokens stored.');
+        return tokens;
+      }
     } catch (err) {
       const error = err.response?.data?.error;
       if (error === 'authorization_pending') {
@@ -174,7 +192,11 @@ export async function pollForToken(deviceCode, intervalSec = 5, expiresInSec = 1
 // STEP 3: Mutex-Locked Auto-Refresh Access Token
 // ─────────────────────────────────────────────
 export async function getValidAccessToken() {
-  const tokens = loadTokens();
+  let tokens = loadTokens();
+  if (!tokens) {
+    await restoreTokensFromFirestore();
+    tokens = loadTokens();
+  }
   if (!tokens) {
     throw new Error('No OAuth tokens found. Please complete device login at /api/v1/auth/youtube/device-code');
   }
@@ -199,14 +221,15 @@ export async function getValidAccessToken() {
 async function doRefresh(refreshToken) {
   logger.info('Refreshing YouTube OAuth token (mutex locked)...');
 
-  const params = new URLSearchParams();
-  params.append('client_id', OAUTH_CONFIG.clientId);
-  params.append('client_secret', OAUTH_CONFIG.clientSecret);
-  params.append('refresh_token', refreshToken);
-  params.append('grant_type', 'refresh_token');
+  const payload = {
+    client_id: OAUTH_CONFIG.clientId,
+    client_secret: OAUTH_CONFIG.clientSecret,
+    refresh_token: refreshToken,
+    grant_type: 'refresh_token'
+  };
 
-  const { data } = await axios.post(OAUTH_CONFIG.tokenUrl, params.toString(), {
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  const { data } = await axios.post(OAUTH_CONFIG.tokenUrl, payload, {
+    headers: { 'Content-Type': 'application/json' },
     timeout: 15000
   });
 

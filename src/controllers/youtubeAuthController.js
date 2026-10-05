@@ -2,6 +2,7 @@ import {
   initiateDeviceFlow,
   pollForToken,
   getAuthStatus,
+  restoreTokensFromFirestore,
   logout
 } from '../services/youtubeAuthService.js';
 import { ApiResponse } from '../utils/apiResponse.js';
@@ -35,6 +36,7 @@ export async function startDeviceFlow(req, res, next) {
 
 export async function getStatus(req, res, next) {
   try {
+    await restoreTokensFromFirestore();
     const status = getAuthStatus();
     return ApiResponse.success(res, status);
   } catch (err) {
