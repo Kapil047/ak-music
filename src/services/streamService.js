@@ -27,8 +27,9 @@ export const YT_HEADERS = {
  * Auto-detects yt-dlp cookies.txt and logs warning if older than 60 days
  */
 export function getCookieArgs() {
-  const cookiePath = env.YTDLP_COOKIES_PATH
-    ? path.resolve(env.YTDLP_COOKIES_PATH)
+  const customPath = process.env.YTDLP_COOKIES_PATH || env.YTDLP_COOKIES_PATH;
+  const cookiePath = customPath
+    ? path.resolve(customPath)
     : path.resolve('./cookies/cookies.txt');
 
   // Auto-restore cookies from environment variable on Render if file doesn't exist yet
@@ -138,12 +139,19 @@ export async function getYtDlpAudioUrl(videoId) {
 
   const { command, argsPrefix } = getYtDlpCommand();
 
+  const cookieArgs = getCookieArgs();
+  const hasCookies = cookieArgs.length > 0;
+
+  const extractorArgs = hasCookies
+    ? ['--remote-components', 'ejs:github']
+    : ['--extractor-args', 'youtube:player_client=android_vr,tv_embedded,visionos'];
+
   const args = [
     ...argsPrefix,
     '-g',
     '-f', 'bestaudio/ba/b',
-    '--extractor-args', 'youtube:player_client=android_vr,tv_embedded,visionos',
-    ...getCookieArgs(),
+    ...extractorArgs,
+    ...cookieArgs,
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificate',

@@ -83,12 +83,19 @@ export async function testYtDlp(req, res) {
   const start = Date.now();
   const { command, argsPrefix } = getYtDlpCommand();
 
+  const cookieArgs = getCookieArgs();
+  const hasCookies = cookieArgs.length > 0;
+
+  const extractorArgs = hasCookies
+    ? ['--remote-components', 'ejs:github']
+    : ['--extractor-args', 'youtube:player_client=android_vr,tv_embedded,visionos'];
+
   const args = [
     ...argsPrefix,
     '-g',
     '-f', 'bestaudio/ba/b',
-    '--extractor-args', 'youtube:player_client=android_vr,tv_embedded,visionos',
-    ...getCookieArgs(),
+    ...extractorArgs,
+    ...cookieArgs,
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificate',
